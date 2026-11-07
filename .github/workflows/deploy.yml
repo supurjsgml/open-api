@@ -75,7 +75,7 @@ jobs:
     needs: [check, build]
     if: needs.check.outputs.changed == 'true'
     runs-on: ubuntu-latest
-    environment: restApi
+    environment: open-api
 
     steps:
       - name: Checkout code
@@ -163,7 +163,7 @@ jobs:
     needs: check
     if: needs.check.outputs.changed == 'false'
     runs-on: ubuntu-latest
-    environment: restApi
+    environment: open-api
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
