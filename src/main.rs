@@ -1,10 +1,13 @@
-use std::net::SocketAddr;
+﻿use std::net::SocketAddr;
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
+use open_api::common::logging::RemoteLogLayer;
 use open_api::config::AppConfig;
 use open_api::{build_router, AppState};
 
@@ -22,16 +25,23 @@ async fn main() {
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
 
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_target(true)
-        .with_thread_ids(true)
-        .init();
-
     let port = config.port;
     let profile = config.profile.clone();
 
     let state = Arc::new(AppState::from_config(config));
+
+    // 콘솔 출력 레이어와 외부 로그 수집기(Axiom, Loki) 전송 레이어를 함께 등록
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_target(true)
+        .with_thread_ids(true);
+    let remote_layer = RemoteLogLayer::new(state.axiom_sender.clone(), state.loki_sender.clone());
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer)
+        .with(remote_layer)
+        .init();
+
     let app = build_router(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

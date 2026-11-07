@@ -1,4 +1,4 @@
-﻿name: 배포 가쥬아
+name: 배포 가쥬아
 
 on:
   workflow_dispatch:

@@ -1,10 +1,11 @@
-use std::{collections::HashMap, time::Duration};
+﻿use std::{collections::HashMap, time::Duration};
 
 use chrono::Utc;
 use reqwest::Client;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{Event, Subscriber, warn};
+use tracing_subscriber::{Layer, layer::Context};
 
 use crate::{
     config::{AxiomConfig, LokiConfig},
@@ -196,5 +197,71 @@ impl LokiSender {
         if let Some(tx) = &self.sender {
             let _ = tx.try_send(entry);
         }
+    }
+}
+
+/// `tracing` 이벤트에서 `message` 필드 문자열을 추출하는 방문자(Visitor) 구조체
+#[derive(Default)]
+struct MessageVisitor {
+    message: String,
+}
+
+impl tracing::field::Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{:?}", value);
+        }
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.message = value.to_string();
+        }
+    }
+}
+
+/// 모든 `tracing` 로그(info!, warn!, error!)를 가로채어 Axiom 및 Loki로 자동 전달하는 구독 레이어
+pub struct RemoteLogLayer {
+    axiom: AxiomBatchSender,
+    loki: LokiSender,
+}
+
+impl RemoteLogLayer {
+    pub fn new(axiom: AxiomBatchSender, loki: LokiSender) -> Self {
+        Self { axiom, loki }
+    }
+}
+
+impl<S: Subscriber> Layer<S> for RemoteLogLayer {
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let metadata = event.metadata();
+        // 로그 전송기 자체에서 발생하는 내부 로그는 무한 루프 방지를 위해 제외
+        if metadata.target().starts_with("reqwest") || metadata.target().starts_with("hyper") {
+            return;
+        }
+
+        let mut visitor = MessageVisitor::default();
+        event.record(&mut visitor);
+
+        if visitor.message.is_empty() {
+            return;
+        }
+
+        let thread_name = std::thread::current()
+            .name()
+            .unwrap_or("tokio-worker")
+            .to_string();
+
+        let entry = LogEntry {
+            timestamp_ms: Utc::now().timestamp_millis(),
+            level: metadata.level().to_string(),
+            logger: metadata.target().to_string(),
+            thread: thread_name,
+            message: visitor.message,
+            exception: None,
+        };
+
+        self.axiom.append(&entry);
+        self.loki.append(entry);
     }
 }

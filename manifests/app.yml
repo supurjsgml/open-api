@@ -1,4 +1,4 @@
-﻿kind: containerapp
+kind: containerapp
 location: koreasouth
 name: rest-api
 resourceGroup: guney-aks
