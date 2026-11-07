@@ -34,40 +34,57 @@ pub fn get_current_uuid() -> Option<String> {
     CURRENT_REQUEST_UUID.try_with(|u| u.clone()).ok()
 }
 
-/// 모든 요청 진입 시 고유 UUID를 발급하고 요청 메타데이터(Origin, Referer, IP 등)를 기록하는 미들웨어
+/// 헬스체크 프로브, 메트릭 수집, 정적 리소스 등 컨트롤러 외 프레임워크 경로인지 판별
+fn is_excluded_from_request_log(path: &str) -> bool {
+    path == "/actuator/health"
+        || path == "/actuator/info"
+        || path == "/actuator/prometheus"
+        || path == "/favicon.ico"
+        || path.starts_with("/css/")
+        || path.starts_with("/js/")
+        || path.starts_with("/images/")
+        || path.starts_with("/swagger-ui")
+        || path.starts_with("/v3/api-docs")
+}
+
+/// 모든 요청 진입 시 고유 UUID를 발급하고 컨트롤러 요청 메타데이터(Origin, Referer, IP 등)를 기록하는 미들웨어
 pub async fn request_logging_middleware(req: Request<Body>, next: Next) -> Response {
     increment_http_requests();
 
     let uuid = Uuid::new_v4().to_string();
-    let headers = req.headers();
+    let path = req.uri().path();
 
-    let origin = headers
-        .get(header::ORIGIN)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+    if !is_excluded_from_request_log(path) {
+        let headers = req.headers();
 
-    let referer = headers
-        .get(header::REFERER)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        let origin = headers
+            .get(header::ORIGIN)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
 
-    // Referer 헤더가 있으면 URL을 파싱하여 호스트명(ClientDomain) 추출
-    let client_domain = referer.as_deref().and_then(|r| match Url::parse(r) {
-        Ok(parsed) => parsed.host_str().map(|h| h.to_string()),
-        Err(e) => {
-            error!("RequestLoggingAspect logRequest ERROR : {}", e);
-            None
-        }
-    });
+        let referer = headers
+            .get(header::REFERER)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
 
-    let ip = IpExtractor::extract(headers, None);
-    let request_url = req.uri().to_string();
-    let method = req.method().to_string();
+        // Referer 헤더가 있으면 URL을 파싱하여 호스트명(ClientDomain) 추출
+        let client_domain = referer.as_deref().and_then(|r| match Url::parse(r) {
+            Ok(parsed) => parsed.host_str().map(|h| h.to_string()),
+            Err(e) => {
+                error!("RequestLoggingAspect logRequest ERROR : {}", e);
+                None
+            }
+        });
 
-    info!(
-        "Request UUID : {} - Origin : {:?} - RequestURL : {} - ClientDomain : {:?} - IP : {} - Package Info : {} {}",
-        uuid, origin, request_url, client_domain, ip, method, request_url
-    );
+        let ip = IpExtractor::extract(headers, None);
+        let request_url = req.uri().to_string();
+        let method = req.method().to_string();
+
+        info!(
+            "Request UUID : {} - Origin : {:?} - RequestURL : {} - ClientDomain : {:?} - IP : {} - Package Info : {} {}",
+            uuid, origin, request_url, client_domain, ip, method, request_url
+        );
+    }
 
     // 생성된 UUID를 현재 요청의 비동기 실행 범위(Scope)에 바인딩하여 하위 핸들러에서 꺼내 쓸 수 있게 함
     CURRENT_REQUEST_UUID.scope(uuid, next.run(req)).await
