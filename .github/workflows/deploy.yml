@@ -1,0 +1,165 @@
+﻿name: 배포 가쥬아
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # 소스 코드 변경 사항 확인
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.changed-files.outputs.changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes
+        id: changed-files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PREV_SHA=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?status=completed&conclusion=success&per_page=1" \
+            | jq -r '.workflow_runs[0].head_sha')
+
+          if [ -z "$PREV_SHA" ] || [ "$PREV_SHA" = "null" ]; then
+            echo ">> 이전 성공 빌드 이력이 없어 직전 커밋(HEAD^)과 비교합니다."
+            PREV_SHA="HEAD^"
+          else
+            echo ">> 이전 성공 배포 커밋: $PREV_SHA"
+          fi
+
+          if git diff --quiet $PREV_SHA HEAD -- \
+            src resources Cargo.toml Dockerfile manifests/app.yml .github/workflows/deploy.yml; then
+            echo ">> 소스 코드 변동 없음 -> 단순 재시작"
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo ">> 소스 코드 변동 감지 -> 신규 빌드 및 배포 진행"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+  # 소스 코드 변경이 있을 때: Docker 멀티스테이지 빌드 및 이미지 푸시 (자동 실행)
+  build:
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_TAG_SHA="ghcr.io/${REPO_LOWER}:${{ github.sha }}"
+          IMAGE_TAG_LATEST="ghcr.io/${REPO_LOWER}:latest"
+
+          docker build -t "$IMAGE_TAG_SHA" -t "$IMAGE_TAG_LATEST" .
+          docker push "$IMAGE_TAG_SHA"
+          docker push "$IMAGE_TAG_LATEST"
+
+  # 소스 코드 변경이 있을 때: 관리자 승인 후 Azure 배포
+  deploy:
+    needs: [check, build]
+    if: needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment: restApi
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure Container Apps
+        env:
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
+          REDIS_TOKEN: ${{ secrets.REDIS_TOKEN }}
+          KAKAO_CLIENT_ID: ${{ secrets.KAKAO_CLIENT_ID }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          APP_ADMIN_EMAILS: ${{ secrets.APP_ADMIN_EMAILS }}
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+          LOKI_USER: ${{ secrets.LOKI_USER }}
+          LOKI_TOKEN: ${{ secrets.LOKI_TOKEN }}
+          AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          export IMAGE_TAG="ghcr.io/${REPO_LOWER}:${{ github.sha }}"
+          export MANAGED_ENV_ID=$(az containerapp env show --name cluster-rest-api --resource-group guney-aks --query id -o tsv)
+
+          # YAML 매니페스트 변수 치환
+          envsubst < manifests/app.yml > manifests/app.rendered.yml
+
+          if ! az containerapp show --name rest-api --resource-group guney-aks &>/dev/null; then
+            echo ">> 신규 Azure Container App 생성: rest-api"
+            az containerapp create \
+              --name rest-api \
+              --resource-group guney-aks \
+              --yaml manifests/app.rendered.yml
+          else
+            echo ">> 기존 Azure Container App 업데이트 배포: rest-api"
+            az containerapp update \
+              --name rest-api \
+              --resource-group guney-aks \
+              --yaml manifests/app.rendered.yml
+          fi
+
+  # 소스 코드 변경이 없을 때: 빌드 건너뛰고 환경변수 갱신 및 즉시 재시작
+  restart:
+    needs: check
+    if: needs.check.outputs.changed == 'false'
+    runs-on: ubuntu-latest
+    environment: restApi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Restart Azure Container App
+        env:
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
+          REDIS_TOKEN: ${{ secrets.REDIS_TOKEN }}
+          KAKAO_CLIENT_ID: ${{ secrets.KAKAO_CLIENT_ID }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          APP_ADMIN_EMAILS: ${{ secrets.APP_ADMIN_EMAILS }}
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+          LOKI_USER: ${{ secrets.LOKI_USER }}
+          LOKI_TOKEN: ${{ secrets.LOKI_TOKEN }}
+          AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          export IMAGE_TAG="ghcr.io/${REPO_LOWER}:${{ github.sha }}"
+          export MANAGED_ENV_ID=$(az containerapp env show --name cluster-rest-api --resource-group guney-aks --query id -o tsv)
+
+          envsubst < manifests/app.yml > manifests/app.rendered.yml
+
+          echo ">> 소스 코드 변경 없음: YAML 설정 반영 및 컨테이너 무중단 재시작"
+          az containerapp update \
+            --name rest-api \
+            --resource-group guney-aks \
+            --yaml manifests/app.rendered.yml

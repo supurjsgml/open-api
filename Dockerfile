@@ -1,9 +1,9 @@
-# Rust 빌드 스테이지
-FROM rust:1.85-slim-bookworm AS builder
+﻿# Rust 빌드 스테이지
+FROM rust:1-slim-bookworm AS builder
 
 WORKDIR /app
 
-# 빌드 캐시 최적화를 위해 매니페스트와 소스 복사 후 릴리즈 빌드 수행
+# 빌드 캐시 및 릴리즈 바이너리 컴파일
 COPY Cargo.toml ./
 COPY src ./src
 COPY resources ./resources

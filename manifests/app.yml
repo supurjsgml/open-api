@@ -1,0 +1,82 @@
+﻿kind: containerapp
+location: koreasouth
+name: rest-api
+resourceGroup: guney-aks
+type: Microsoft.App/containerApps
+properties:
+  managedEnvironmentId: ${MANAGED_ENV_ID}
+  configuration:
+    activeRevisionsMode: Single
+    ingress:
+      external: true
+      targetPort: 8080
+      transport: auto
+      allowInsecure: false
+    registries: []
+  template:
+    containers:
+      - name: rest-api
+        image: ${IMAGE_TAG}
+        resources:
+          cpu: 0.5
+          memory: 1.0Gi
+        probes:
+          - type: Startup
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 20
+          - type: Liveness
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          - type: Readiness
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 6
+        env:
+          - name: SPRING_PROFILES_ACTIVE
+            value: "prod"
+          - name: REDIS_HOST
+            value: "${REDIS_HOST}"
+          - name: REDIS_PORT
+            value: "${REDIS_PORT}"
+          - name: REDIS_TOKEN
+            value: "${REDIS_TOKEN}"
+          - name: KAKAO_CLIENT_ID
+            value: "${KAKAO_CLIENT_ID}"
+          - name: KAKAO_CLIENT_SECRET
+            value: "${KAKAO_CLIENT_SECRET}"
+          - name: KAKAO_REFRESH_TOKEN
+            value: "${KAKAO_REFRESH_TOKEN}"
+          - name: GEMINI_API_KEY
+            value: "${GEMINI_API_KEY}"
+          - name: APP_ADMIN_EMAILS
+            value: "${APP_ADMIN_EMAILS}"
+          - name: GRAFANA_TOKEN
+            value: "${GRAFANA_TOKEN}"
+          - name: LOKI_USER
+            value: "${LOKI_USER}"
+          - name: LOKI_TOKEN
+            value: "${LOKI_TOKEN}"
+          - name: AXIOM_TOKEN
+            value: "${AXIOM_TOKEN}"
+    scale:
+      minReplicas: 2
+      maxReplicas: 5
+      rules:
+        - name: http-scaling-rule
+          http:
+            metadata:
+              concurrentRequests: "50"
