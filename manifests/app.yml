@@ -6,7 +6,7 @@ type: Microsoft.App/containerApps
 properties:
   managedEnvironmentId: ${MANAGED_ENV_ID}
   configuration:
-    activeRevisionsMode: Single
+    activeRevisionsMode: Multiple
     ingress:
       external: true
       targetPort: 8080
@@ -14,6 +14,7 @@ properties:
       allowInsecure: false
     registries: []
   template:
+    revisionSuffix: rust-${SHORT_SHA}
     containers:
       - name: rest-api
         image: ${IMAGE_TAG}

@@ -25,11 +25,11 @@ jobs:
             | jq -r '.workflow_runs[0].head_sha')
 
           if [ -z "$PREV_SHA" ] || [ "$PREV_SHA" = "null" ]; then
-            echo ">> 이전 성공 빌드 이력이 없어 직전 커밋(HEAD^)과 비교합니다."
-            PREV_SHA="HEAD^"
-          else
-            echo ">> 이전 성공 배포 커밋: $PREV_SHA"
+            echo ">> 이전 성공 배포 이력이 없으므로 최초 전체 빌드 및 배포를 진행합니다."
+            echo "changed=true" >> $GITHUB_OUTPUT
+            exit 0
           fi
+          echo ">> 이전 성공 배포 커밋: $PREV_SHA"
 
           if git diff --quiet $PREV_SHA HEAD -- \
             src resources Cargo.toml Dockerfile manifests/app.yml .github/workflows/deploy.yml; then
@@ -70,7 +70,7 @@ jobs:
           docker push "$IMAGE_TAG_SHA"
           docker push "$IMAGE_TAG_LATEST"
 
-  # 소스 코드 변경이 있을 때: 관리자 승인 후 Azure 배포
+  # 소스 코드 변경이 있을 때: 관리자 승인 후 Azure 배포 및 50:50 트래픽 분산
   deploy:
     needs: [check, build]
     if: needs.check.outputs.changed == 'true'
@@ -86,7 +86,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to Azure Container Apps
+      - name: Deploy to Azure Container Apps (50:50 Traffic Split)
         env:
           REDIS_HOST: ${{ secrets.REDIS_HOST }}
           REDIS_PORT: ${{ secrets.REDIS_PORT }}
@@ -103,9 +103,10 @@ jobs:
         run: |
           REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           export IMAGE_TAG="ghcr.io/${REPO_LOWER}:${{ github.sha }}"
+          export SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          export NEW_RUST_REV="rest-api--rust-${SHORT_SHA}"
           export MANAGED_ENV_ID=$(az containerapp env show --name cluster-rest-api --resource-group guney-aks --query id -o tsv)
 
-          # YAML 매니페스트 변수 치환
           envsubst < manifests/app.yml > manifests/app.rendered.yml
 
           if ! az containerapp show --name rest-api --resource-group guney-aks &>/dev/null; then
@@ -115,14 +116,49 @@ jobs:
               --resource-group guney-aks \
               --yaml manifests/app.rendered.yml
           else
-            echo ">> 기존 Azure Container App 업데이트 배포: rest-api"
+            # 기존 Java 리비전이 종료되지 않도록 먼저 Multiple 모드로 전환 후 현재 Java 리비전명 조회
+            az containerapp revision set-mode \
+              --name rest-api \
+              --resource-group guney-aks \
+              --mode multiple
+
+            JAVA_REV=$(az containerapp revision list \
+              --name rest-api \
+              --resource-group guney-aks \
+              --query "[?properties.active && !contains(name, '--rust-')].name | [-1]" -o tsv)
+
+            echo ">> 신규 Rust 리비전($NEW_RUST_REV) 추가 배포 진행"
             az containerapp update \
               --name rest-api \
               --resource-group guney-aks \
               --yaml manifests/app.rendered.yml
+
+            # 이전에 배포했던 구버전 Rust 리비전이 있으면 비활성화 (최신 Rust 1개 + Java 1개만 유지)
+            OLD_RUST_REVS=$(az containerapp revision list \
+              --name rest-api \
+              --resource-group guney-aks \
+              --query "[?properties.active && contains(name, '--rust-') && name != '${NEW_RUST_REV}'].name" -o tsv)
+            for rev in $OLD_RUST_REVS; do
+              echo ">> 이전 Rust 리비전 비활성화: $rev"
+              az containerapp revision deactivate --name rest-api --resource-group guney-aks --revision "$rev" || true
+            done
+
+            if [ -n "$JAVA_REV" ]; then
+              echo ">> Java($JAVA_REV) 50% : Rust($NEW_RUST_REV) 50% 트래픽 로드밸런싱 설정"
+              az containerapp ingress traffic set \
+                --name rest-api \
+                --resource-group guney-aks \
+                --revision-weight "${JAVA_REV}=50" "${NEW_RUST_REV}=50"
+            else
+              echo ">> 활성화된 Java 리비전이 없어 Rust($NEW_RUST_REV)에 100% 트래픽 할당"
+              az containerapp ingress traffic set \
+                --name rest-api \
+                --resource-group guney-aks \
+                --revision-weight "${NEW_RUST_REV}=100"
+            fi
           fi
 
-  # 소스 코드 변경이 없을 때: 빌드 건너뛰고 환경변수 갱신 및 즉시 재시작
+  # 소스 코드 변경이 없을 때: 빌드 건너뛰고 환경변수 갱신 및 트래픽 비율 유지
   restart:
     needs: check
     if: needs.check.outputs.changed == 'false'
@@ -154,11 +190,13 @@ jobs:
         run: |
           REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           export IMAGE_TAG="ghcr.io/${REPO_LOWER}:${{ github.sha }}"
+          export SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          export NEW_RUST_REV="rest-api--rust-${SHORT_SHA}"
           export MANAGED_ENV_ID=$(az containerapp env show --name cluster-rest-api --resource-group guney-aks --query id -o tsv)
 
           envsubst < manifests/app.yml > manifests/app.rendered.yml
 
-          echo ">> 소스 코드 변경 없음: YAML 설정 반영 및 컨테이너 무중단 재시작"
+          echo ">> 소스 코드 변경 없음: YAML 설정 반영"
           az containerapp update \
             --name rest-api \
             --resource-group guney-aks \
