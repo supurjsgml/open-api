@@ -1,0 +1,11 @@
+package ${packPath}.repository;
+
+import ${packPath}.dto.${dtoNm};
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface ${fileNm}Mapper {
+
+    ${dtoNm} ${methodNm}(${dtoNm} ${dtoVarName});
+    
+}

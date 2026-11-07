@@ -1,0 +1,24 @@
+package ${packPath}.dto;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AccessLevel;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.AllArgsConstructor;
+import lombok.NoArgsConstructor;
+import lombok.ToString;
+
+@Getter
+@Setter
+@Builder
+@ToString
+@AllArgsConstructor
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
+@Schema(name = "${fileNm} DTO", description = "${fileNm} DTO")
+public class ${fileNm}DTO {
+
+    @Schema(description = "", example = "")
+    private String test;
+
+}

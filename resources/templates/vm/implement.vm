@@ -1,0 +1,21 @@
+package ${packPath}.service.impl;
+
+import org.springframework.stereotype.Service;
+
+import ${packPath}.dto.${dtoNm};
+import ${packPath}.service.${fileNm}Service;
+import ${packPath}.repository.${fileNm}Mapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ${fileNm}ServiceImpl implements ${fileNm}Service {
+    
+    //private final ${fileNm}Mapper ${fileVarName}Mapper;
+    
+    public void ${methodNm}(${dtoNm} ${dtoVarName}) {
+        //${fileVarName}Mapper.${methodNm}(${dtoVarName});
+    }
+}

@@ -1,0 +1,7 @@
+package ${packPath}.service;
+
+import ${packPath}.dto.${dtoNm};
+
+public interface ${fileNm}Service {
+    public void ${methodNm}(${dtoNm} ${dtoVarName});
+}
