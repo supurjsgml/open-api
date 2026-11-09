@@ -32,7 +32,7 @@ jobs:
           echo ">> 이전 성공 배포 커밋: $PREV_SHA"
 
           if git diff --quiet $PREV_SHA HEAD -- \
-            src resources Cargo.toml Dockerfile manifests/app.yml .github/workflows/deploy.yml; then
+            src resources Cargo.toml Dockerfile; then
             echo ">> 소스 코드 변동 없음 -> 단순 재시작"
             echo "changed=false" >> $GITHUB_OUTPUT
           else
@@ -104,6 +104,9 @@ jobs:
           REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           export IMAGE_TAG="ghcr.io/${REPO_LOWER}:${{ github.sha }}"
           export SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          if az containerapp revision show --name rest-api --resource-group guney-aks --revision "rest-api--rust-${SHORT_SHA}" &>/dev/null; then
+            export SHORT_SHA="${SHORT_SHA}-${{ github.run_number }}"
+          fi
           export NEW_RUST_REV="rest-api--rust-${SHORT_SHA}"
           export MANAGED_ENV_ID=$(az containerapp env show --name cluster-rest-api --resource-group guney-aks --query id -o tsv)
 
@@ -189,15 +192,51 @@ jobs:
           AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
         run: |
           REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          export IMAGE_TAG="ghcr.io/${REPO_LOWER}:${{ github.sha }}"
+          export IMAGE_TAG="ghcr.io/${REPO_LOWER}:latest"
           export SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          if az containerapp revision show --name rest-api --resource-group guney-aks --revision "rest-api--rust-${SHORT_SHA}" &>/dev/null; then
+            export SHORT_SHA="${SHORT_SHA}-${{ github.run_number }}"
+          fi
           export NEW_RUST_REV="rest-api--rust-${SHORT_SHA}"
           export MANAGED_ENV_ID=$(az containerapp env show --name cluster-rest-api --resource-group guney-aks --query id -o tsv)
 
           envsubst < manifests/app.yml > manifests/app.rendered.yml
 
-          echo ">> 소스 코드 변경 없음: YAML 설정 반영"
+          az containerapp revision set-mode \
+            --name rest-api \
+            --resource-group guney-aks \
+            --mode multiple
+
+          JAVA_REV=$(az containerapp revision list \
+            --name rest-api \
+            --resource-group guney-aks \
+            --query "[?properties.active && !contains(name, '--rust-')].name | [-1]" -o tsv)
+
+          echo ">> 소스 코드 변경 없음: 신규 리비전($NEW_RUST_REV)으로 YAML 설정 반영"
           az containerapp update \
             --name rest-api \
             --resource-group guney-aks \
             --yaml manifests/app.rendered.yml
+
+          OLD_RUST_REVS=$(az containerapp revision list \
+            --name rest-api \
+            --resource-group guney-aks \
+            --query "[?properties.active && contains(name, '--rust-') && name != '${NEW_RUST_REV}'].name" -o tsv)
+          for rev in $OLD_RUST_REVS; do
+            echo ">> 이전 Rust 리비전 비활성화: $rev"
+            az containerapp revision deactivate --name rest-api --resource-group guney-aks --revision "$rev" || true
+          done
+
+          if [ -n "$JAVA_REV" ]; then
+            echo ">> Java($JAVA_REV) 50% : Rust($NEW_RUST_REV) 50% 트래픽 로드밸런싱 설정"
+            az containerapp ingress traffic set \
+              --name rest-api \
+              --resource-group guney-aks \
+              --revision-weight "${JAVA_REV}=50" "${NEW_RUST_REV}=50"
+          else
+            echo ">> 활성화된 Java 리비전이 없어 Rust($NEW_RUST_REV)에 100% 트래픽 할당"
+            az containerapp ingress traffic set \
+              --name rest-api \
+              --resource-group guney-aks \
+              --revision-weight "${NEW_RUST_REV}=100"
+          fi
