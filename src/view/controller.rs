@@ -1,6 +1,22 @@
+use std::sync::Arc;
+
 use axum::response::{Html, Redirect};
-use axum::Json;
-use serde_json::{json, Value};
+use axum::routing::get;
+use axum::{Json, Router};
+use serde_json::{Value, json};
+
+use crate::AppState;
+
+/// 문서 및 뷰 페이지 라우터를 생성합니다.
+pub fn router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/", get(root_redirect))
+        .route("/redoc", get(redoc_page))
+        .route("/jsp", get(jsp_page))
+        .route("/swagger-ui", get(swagger_ui_page))
+        .route("/swagger-ui/index.html", get(swagger_ui_page))
+        .route("/v3/api-docs", get(openapi_json))
+}
 
 /// 컴파일 타임에 내장되는 Redoc HTML 템플릿 (파일 시스템에 없을 때 폴백으로 사용)
 const REDOC_HTML_EMBEDDED: &str = include_str!("../../resources/templates/html/index.html");

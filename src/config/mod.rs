@@ -52,6 +52,15 @@ pub struct AxiomConfig {
     pub max_queue_size: usize,
 }
 
+/// Grafana Cloud OTLP 메트릭 푸시 설정
+#[derive(Debug, Clone)]
+pub struct GrafanaOtlpConfig {
+    pub enabled: bool,
+    pub url: String,
+    pub token: String,
+    pub step_secs: u64,
+}
+
 /// Kafka 브로커 및 컨슈머 그룹 설정
 #[derive(Debug, Clone)]
 pub struct KafkaSettings {
@@ -75,6 +84,7 @@ pub struct AppConfig {
     pub kafka: KafkaSettings,
     pub loki: LokiConfig,
     pub axiom: AxiomConfig,
+    pub grafana_otlp: GrafanaOtlpConfig,
     pub allowed_origins: Vec<String>,
 }
 
@@ -246,6 +256,18 @@ impl AppConfig {
                 batch_size: 50,
                 flush_interval_ms: 1000,
                 max_queue_size: 2048,
+            },
+            grafana_otlp: {
+                let grafana_token = env::var("GRAFANA_TOKEN").unwrap_or_default();
+                GrafanaOtlpConfig {
+                    enabled: !is_local && !grafana_token.trim().is_empty(),
+                    url: env::var("OTLP_METRICS_URL").unwrap_or_else(|_| {
+                        "https://otlp-gateway-prod-ap-northeast-0.grafana.net/otlp/v1/metrics"
+                            .to_string()
+                    }),
+                    token: grafana_token,
+                    step_secs: 60,
+                }
             },
             allowed_origins,
         }

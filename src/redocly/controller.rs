@@ -1,7 +1,20 @@
-use axum::http::StatusCode;
-use axum::Json;
+use std::sync::Arc;
 
+use axum::http::StatusCode;
+use axum::routing::{delete, get, post, put};
+use axum::{Json, Router};
+
+use crate::AppState;
 use crate::redocly::dto::SampleDTO;
+
+/// Redocly 샘플 도메인 라우터를 생성합니다.
+pub fn router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/getUrl", get(get_url))
+        .route("/api/add", post(add_url))
+        .route("/api/mod", put(mod_url))
+        .route("/api/del", delete(del_url))
+}
 
 /// GET `/api/getUrl`
 /// 서버 깨우기 및 연결 확인용 텍스트를 반환합니다.

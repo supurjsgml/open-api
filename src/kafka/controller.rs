@@ -1,13 +1,19 @@
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
-use axum::Json;
+use axum::routing::get;
+use axum::{Json, Router};
 use serde::Deserialize;
 
+use crate::AppState;
 use crate::common::dto::{ApiBodyResponse, HeaderSuccess};
 use crate::common::util::api_res_util::ApiResUtil;
 use crate::member::dto::MemberReqDTO;
-use crate::AppState;
+
+/// 메시지 브로커 도메인 라우터를 생성합니다.
+pub fn router() -> Router<Arc<AppState>> {
+    Router::new().route("/kafka/send", get(send_msg))
+}
 
 /// `/kafka/send` 쿼리 파라미터
 #[derive(Debug, Deserialize)]

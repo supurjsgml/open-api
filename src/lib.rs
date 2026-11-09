@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 use axum::http::{HeaderValue, Method};
 use axum::middleware;
-use axum::routing::{delete, get, post, put};
 use axum::Router;
 use tokio::sync::RwLock;
 use tower_http::compression::CompressionLayer;
@@ -77,6 +76,7 @@ impl AppState {
 
         let axiom_sender = AxiomBatchSender::start(&config.axiom);
         let loki_sender = LokiSender::start(&config.loki);
+        crate::grafana::metrics::start_otlp_metrics_exporter(http_client.clone(), &config);
 
         Self {
             config,
@@ -120,77 +120,17 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .allow_credentials(true);
 
     Router::new()
-        // 문서 및 뷰 라우트
-        .route("/", get(view::controller::root_redirect))
-        .route("/redoc", get(view::controller::redoc_page))
-        .route("/jsp", get(view::controller::jsp_page))
-        .route("/swagger-ui", get(view::controller::swagger_ui_page))
-        .route(
-            "/swagger-ui/index.html",
-            get(view::controller::swagger_ui_page),
-        )
-        .route("/v3/api-docs", get(view::controller::openapi_json))
-        // Gemini AI 라우트
-        .route("/api/gemini/summarize", post(gemini::controller::summarize))
-        .route("/api/gemini/models", get(gemini::controller::get_models))
-        // 대시보드 및 방문자 통계 라우트
-        .route(
-            "/api/front/dashboardStats",
-            get(internal::controller::get_dashboard_stats),
-        )
-        .route(
-            "/api/front/pageStats",
-            get(internal::controller::get_page_stats),
-        )
-        .route("/api/front/hit", post(internal::controller::record_hit))
-        // 카카오 연동 라우트
-        .route(
-            "/api/kakao/refresh-token",
-            post(kakao::controller::refresh_kakao_token),
-        )
-        .route(
-            "/api/kakao/send",
-            post(kakao::controller::send_kakao_message),
-        )
-        // 회원(잡코리아) 연동 라우트
-        .route(
-            "/member/jobKorea/login",
-            post(member::controller::job_korea_login),
-        )
-        .route(
-            "/member/jobKorea/logout",
-            post(member::controller::job_korea_logout),
-        )
-        // 클라우드 컨테이너 원격 재시작 라우트
-        .route(
-            "/api/lightsail/restart",
-            get(common::lightsail_controller::restart_scheduler),
-        )
-        .route(
-            "/api/lightsail/restart-api",
-            get(common::lightsail_controller::restart_rest_api),
-        )
-        // 공통 템플릿 생성 및 조회 라우트
-        .route("/com/genFile", post(common::controller::gen_file))
-        .route("/com/getFileInfo", post(common::controller::get_file_info))
-        // 메시지 브로커 라우트
-        .route("/kafka/send", get(kafka::controller::send_msg))
-        // 대용량 DTO 변환 테스트 라우트
-        .route("/test/commonUtil", get(junit::controller::test_common_util))
-        .route("/test/mapStruct", get(junit::controller::test_map_struct))
-        // Redocly 샘플 라우트
-        .route("/api/getUrl", get(redocly::controller::get_url))
-        .route("/api/add", post(redocly::controller::add_url))
-        .route("/api/mod", put(redocly::controller::mod_url))
-        .route("/api/del", delete(redocly::controller::del_url))
-        // 모니터링 및 헬스체크 라우트
-        .route("/actuator/threads", get(grafana::controller::get_all_threads))
-        .route("/actuator/health", get(grafana::controller::health))
-        .route("/actuator/info", get(grafana::controller::info))
-        .route(
-            "/actuator/prometheus",
-            get(grafana::controller::prometheus_metrics),
-        )
+        .merge(view::controller::router())
+        .merge(gemini::controller::router())
+        .merge(internal::controller::router())
+        .merge(kakao::controller::router())
+        .merge(member::controller::router())
+        .merge(common::lightsail_controller::router())
+        .merge(common::controller::router())
+        .merge(kafka::controller::router())
+        .merge(junit::controller::router())
+        .merge(redocly::controller::router())
+        .merge(grafana::controller::router())
         // 정적 리소스 서빙 (`/css`, `/js`, `/images`, `/favicon.ico`)
         .nest_service("/css", ServeDir::new("resources/static/css"))
         .nest_service("/js", ServeDir::new("resources/static/js"))

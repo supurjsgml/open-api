@@ -1,13 +1,22 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::Json;
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde_json::Value;
 
+use crate::AppState;
 use crate::common::dto::ApiBodyResponse;
 use crate::common::util::api_res_util::ApiResUtil;
 use crate::internal::dto::{DashboardStatsDTO, PageVisitsDTO, VisitorHitReqDTO};
-use crate::AppState;
+
+/// 대시보드 및 방문자 통계 도메인 라우터를 생성합니다.
+pub fn router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/front/dashboardStats", get(get_dashboard_stats))
+        .route("/api/front/pageStats", get(get_page_stats))
+        .route("/api/front/hit", post(record_hit))
+}
 
 /// GET `/api/front/dashboardStats`
 /// 주간 방문자 통계 및 트렌드 데이터를 조회합니다.

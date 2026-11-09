@@ -1,7 +1,16 @@
-use std::{env, path::Path, process::Command};
+use std::{env, path::Path, process::Command, sync::Arc};
 
-use axum::{Json, http::StatusCode};
+use axum::{Json, Router, http::StatusCode, routing::get};
 use tracing::{error, info};
+
+use crate::AppState;
+
+/// 클라우드 컨테이너 원격 재시작 라우터를 생성합니다.
+pub fn router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/lightsail/restart", get(restart_scheduler))
+        .route("/api/lightsail/restart-api", get(restart_rest_api))
+}
 
 /// GET /api/lightsail/restart - 리눅스 서버의 PM2 프로세스(scheduler-job) 재시작 핸들러
 pub async fn restart_scheduler() -> (StatusCode, Json<&'static str>) {

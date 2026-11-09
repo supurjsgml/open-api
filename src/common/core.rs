@@ -36,9 +36,7 @@ pub fn get_current_uuid() -> Option<String> {
 
 /// 헬스체크 프로브, 메트릭 수집, 정적 리소스 등 컨트롤러 외 프레임워크 경로인지 판별
 fn is_excluded_from_request_log(path: &str) -> bool {
-    path == "/actuator/health"
-        || path == "/actuator/info"
-        || path == "/actuator/prometheus"
+    path.starts_with("/actuator")
         || path == "/favicon.ico"
         || path.starts_with("/css/")
         || path.starts_with("/js/")

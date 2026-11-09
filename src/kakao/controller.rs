@@ -1,14 +1,22 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::Json;
+use axum::routing::post;
+use axum::{Json, Router};
 use serde_json::Value;
 
+use crate::AppState;
 use crate::common::core::AppError;
 use crate::common::dto::ApiBodyResponse;
 use crate::common::util::api_res_util::ApiResUtil;
 use crate::kakao::dto::{KakaoSendReqDTO, KakaoTokenResDTO};
-use crate::AppState;
+
+/// 카카오 연동 도메인 라우터를 생성합니다.
+pub fn router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/kakao/refresh-token", post(refresh_kakao_token))
+        .route("/api/kakao/send", post(send_kakao_message))
+}
 
 /// POST `/api/kakao/refresh-token`
 /// 카카오 Access Token 및 Refresh Token을 수동으로 갱신하고 Redis에 저장합니다.

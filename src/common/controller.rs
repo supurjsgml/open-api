@@ -1,10 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
 use axum::{
-    Json,
+    Json, Router,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
+    routing::post,
 };
 use tracing::error;
 
@@ -17,6 +18,13 @@ use crate::{
         util::api_res_util::ApiResUtil,
     },
 };
+
+/// 공통 템플릿 생성 및 조회 라우터를 생성합니다.
+pub fn router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/com/genFile", post(gen_file))
+        .route("/com/getFileInfo", post(get_file_info))
+}
 
 /// POST `/com/genFile` - 보일러플레이트 패키지 및 소스 파일 생성 핸들러
 pub async fn gen_file(

@@ -6,15 +6,23 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
+use crate::AppState;
 use crate::common::dto::ApiBodyResponse;
 use crate::common::util::api_res_util::ApiResUtil;
 use crate::gemini::dto::{GeminiModelResDTO, GeminiReqDTO};
-use crate::AppState;
+
+/// Gemini AI 도메인 라우터를 생성합니다.
+pub fn router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/gemini/summarize", post(summarize))
+        .route("/api/gemini/models", get(get_models))
+}
 
 /// Google OAuth2 토큰 검증 결과 구조체
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

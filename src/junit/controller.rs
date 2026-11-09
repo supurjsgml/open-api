@@ -1,9 +1,20 @@
-use axum::Json;
+use std::sync::Arc;
 
+use axum::routing::get;
+use axum::{Json, Router};
+
+use crate::AppState;
 use crate::common::util::common_util::CommonUtil;
 use crate::junit::dto::{
     OrderResponseMapper, OrderSeatAssignPriceResponseDto, SeatAssignPriceDto,
 };
+
+/// 대용량 DTO 변환 테스트 도메인 라우터를 생성합니다.
+pub fn router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/test/commonUtil", get(test_common_util))
+        .route("/test/mapStruct", get(test_map_struct))
+}
 
 /// 성능 비교 테스트를 위한 30,000건의 더미 좌석 가격 데이터를 생성합니다.
 pub fn create_dummy_data() -> Vec<SeatAssignPriceDto> {
