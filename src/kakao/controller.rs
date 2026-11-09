@@ -4,6 +4,7 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::Value;
+use tracing::info;
 
 use crate::AppState;
 use crate::common::core::AppError;
@@ -23,6 +24,7 @@ pub fn router() -> Router<Arc<AppState>> {
 pub async fn refresh_kakao_token(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ApiBodyResponse<KakaoTokenResDTO>>, AppError> {
+    info!("외부 카카오 토큰 갱신 요청 수신 (Scheduler-Job)");
     match state.kakao_service.refresh_kakao_token().await {
         Ok(res) => Ok(Json(ApiResUtil::success_data(res))),
         Err(msg) => Err(AppError::ServerException {
@@ -40,6 +42,7 @@ pub async fn send_kakao_message(
     Json(req): Json<KakaoSendReqDTO>,
 ) -> Json<ApiBodyResponse<Value>> {
     let msg = req.msg.unwrap_or_default();
+    info!("외부 카카오 메시지 전송 요청 수신 (Scheduler-Job): {}", msg);
     state.kakao_service.send_kakao_external(&msg).await;
     Json(ApiResUtil::success())
 }

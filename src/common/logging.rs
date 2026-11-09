@@ -1,4 +1,4 @@
-﻿use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use chrono::Utc;
 use reqwest::Client;
@@ -147,11 +147,13 @@ impl LokiSender {
             return Self { sender: None };
         }
 
-        let url = config.url.clone();
-        let user = config.user.clone();
-        let token = config.token.clone();
+        let url = config.url.trim().to_string();
+        let user = config.user.trim().to_string();
+        let token = config.token.trim().to_string();
         let replica = resolve_pod_name(None);
-        let (tx, mut rx) = mpsc::channel::<LogEntry>(1024);
+        let batch_size = 50usize;
+        let flush_interval = Duration::from_millis(1000);
+        let (tx, mut rx) = mpsc::channel::<LogEntry>(2048);
 
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(3))
@@ -160,33 +162,36 @@ impl LokiSender {
             .unwrap_or_default();
 
         tokio::spawn(async move {
-            while let Some(entry) = rx.recv().await {
-                let ts_ns = (entry.timestamp_ms as i128 * 1_000_000).to_string();
-                let line = format!(
-                    "[{}] {:<5} {} - {}",
-                    entry.thread, entry.level, entry.logger, entry.message
-                );
-                let payload = json!({
-                    "streams": [
-                        {
-                            "stream": {
-                                "app": "rest-api",
-                                "replica": replica,
-                                "level": entry.level
-                            },
-                            "values": [
-                                [ts_ns, line]
-                            ]
-                        }
-                    ]
-                });
+            let mut buffer: Vec<LogEntry> = Vec::with_capacity(batch_size);
+            let mut ticker = tokio::time::interval(flush_interval);
 
-                let _ = client
-                    .post(&url)
-                    .basic_auth(&user, Some(&token))
-                    .json(&payload)
-                    .send()
-                    .await;
+            loop {
+                tokio::select! {
+                    maybe_entry = rx.recv() => {
+                        match maybe_entry {
+                            Some(entry) => {
+                                buffer.push(entry);
+                                if buffer.len() >= batch_size {
+                                    let batch = std::mem::replace(&mut buffer, Vec::with_capacity(batch_size));
+                                    Self::send_batch(&client, &url, &user, &token, &replica, batch).await;
+                                }
+                            }
+                            None => {
+                                if !buffer.is_empty() {
+                                    let batch = std::mem::take(&mut buffer);
+                                    Self::send_batch(&client, &url, &user, &token, &replica, batch).await;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    _ = ticker.tick() => {
+                        if !buffer.is_empty() {
+                            let batch = std::mem::replace(&mut buffer, Vec::with_capacity(batch_size));
+                            Self::send_batch(&client, &url, &user, &token, &replica, batch).await;
+                        }
+                    }
+                }
             }
         });
 
@@ -196,6 +201,67 @@ impl LokiSender {
     pub fn append(&self, entry: LogEntry) {
         if let Some(tx) = &self.sender {
             let _ = tx.try_send(entry);
+        }
+    }
+
+    async fn send_batch(
+        client: &Client,
+        url: &str,
+        user: &str,
+        token: &str,
+        replica: &str,
+        batch: Vec<LogEntry>,
+    ) {
+        let mut grouped: HashMap<String, Vec<[String; 2]>> = HashMap::new();
+
+        for entry in batch {
+            let ts_ns = (entry.timestamp_ms as i128 * 1_000_000).to_string();
+            let formatted_time = chrono::DateTime::from_timestamp_millis(entry.timestamp_ms)
+                .unwrap_or_else(Utc::now)
+                .format("%Y-%m-%d %H:%M:%S%.3f");
+            let line = format!(
+                "{} [{}] {:<5} {} - {}",
+                formatted_time, entry.thread, entry.level, entry.logger, entry.message
+            );
+            grouped
+                .entry(entry.level)
+                .or_default()
+                .push([ts_ns, line]);
+        }
+
+        let streams: Vec<Value> = grouped
+            .into_iter()
+            .map(|(level, values)| {
+                json!({
+                    "stream": {
+                        "app": "rest-api",
+                        "replica": replica,
+                        "level": level
+                    },
+                    "values": values
+                })
+            })
+            .collect();
+
+        let payload = json!({ "streams": streams });
+
+        match client
+            .post(url)
+            .basic_auth(user, Some(token))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await
+        {
+            Ok(resp) if !resp.status().is_success() => {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                eprintln!("Loki 로그 전송 실패: status={}, body={}", status, body);
+            }
+            Err(err) => {
+                eprintln!("Loki 로그 전송 중 오류 발생: {}", err);
+            }
+            _ => {}
         }
     }
 }
