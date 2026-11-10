@@ -6,16 +6,13 @@ use axum::http::{Request, StatusCode, header};
 use tower::ServiceExt;
 
 use open_api::common::enums::MessageEnum;
-use open_api::common::util::common_util::CommonUtil;
-use open_api::common::util::date_utils::DateUtils;
-use open_api::common::util::messages_utils::MessagesUtils;
-use open_api::common::util::rex_util::RexUtil;
+use open_api::common::util::{common_util, date_utils, messages_utils, rex_util};
 use open_api::config::AppConfig;
 use open_api::junit::controller::create_dummy_data;
 use open_api::junit::dto::{
     OrderResponseMapper, OrderSeatAssignPriceResponseDto, SeatAssignPriceDto,
 };
-use open_api::{build_router, AppState};
+use open_api::{AppState, build_router};
 
 /// 30,000건 대용량 DTO 리스트 변환 정합성 및 성능 비교 테스트
 #[test]
@@ -25,7 +22,7 @@ fn test_30000_dto_mapping_equivalence_and_performance() {
 
     let start_common = Instant::now();
     let common_result =
-        CommonUtil::convert_list::<SeatAssignPriceDto, OrderSeatAssignPriceResponseDto>(
+        common_util::convert_list::<SeatAssignPriceDto, OrderSeatAssignPriceResponseDto>(
             &source_list,
         );
     let elapsed_common = start_common.elapsed();
@@ -54,25 +51,25 @@ fn test_30000_dto_mapping_equivalence_and_performance() {
 #[test]
 fn test_common_utilities() {
     assert_eq!(
-        CommonUtil::convert_camel_to_snake("productTurnPriceSequence"),
+        common_util::convert_camel_to_snake("productTurnPriceSequence"),
         "PRODUCT_TURN_PRICE_SEQUENCE"
     );
     assert_eq!(
-        CommonUtil::convert_snake_to_camel("PRODUCT_TURN_PRICE_SEQUENCE"),
+        common_util::convert_snake_to_camel("PRODUCT_TURN_PRICE_SEQUENCE"),
         "productTurnPriceSequence"
     );
-    assert_eq!(CommonUtil::str_paging(1, 10), "LIMIT 0, 10");
-    assert_eq!(CommonUtil::capitalize("sample"), "Sample");
-    assert_eq!(CommonUtil::decapitalize("SampleDTO"), "sampleDTO");
+    assert_eq!(common_util::str_paging(1, 10), "LIMIT 0, 10");
+    assert_eq!(common_util::capitalize("sample"), "Sample");
+    assert_eq!(common_util::decapitalize("SampleDTO"), "sampleDTO");
 
-    assert!(RexUtil::is_number("123456"));
-    assert!(!RexUtil::is_number("abc-123"));
-    assert!(RexUtil::is_date("2026-11-06"));
+    assert!(rex_util::is_number("123456"));
+    assert!(!rex_util::is_number("abc-123"));
+    assert!(rex_util::is_date("2026-11-06"));
 
-    let today = DateUtils::current_date_format(Some("yyyyMMdd"));
+    let today = date_utils::current_date_format(Some("yyyyMMdd"));
     assert_eq!(today.len(), 8);
 
-    let ok_msg = MessagesUtils::get_message(MessageEnum::Success.code());
+    let ok_msg = messages_utils::get_message(MessageEnum::Success.code());
     assert_eq!(ok_msg, "정상");
 }
 

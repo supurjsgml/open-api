@@ -14,8 +14,9 @@ use tracing::{error, info, warn};
 
 use crate::AppState;
 use crate::common::dto::ApiBodyResponse;
-use crate::common::util::api_res_util::ApiResUtil;
+use crate::common::util::api_res_util;
 use crate::gemini::dto::{GeminiModelResDTO, GeminiReqDTO};
+use crate::gemini::{rate_limit, service};
 
 /// Gemini AI 도메인 라우터를 생성합니다.
 pub fn router() -> Router<Arc<AppState>> {
@@ -90,10 +91,7 @@ pub async fn summarize(
         .or(token_info.email.as_deref());
 
     // 일일 호출 횟수 제한 검사
-    let allowed = state
-        .rate_limit_service
-        .check_limit(token_info.email.as_deref(), sub_id)
-        .await;
+    let allowed = rate_limit::check_limit(&state, token_info.email.as_deref(), sub_id).await;
 
     if !allowed {
         return plain_text_response(
@@ -102,7 +100,7 @@ pub async fn summarize(
     }
 
     // 비동기 텍스트 스트림 생성 및 반환
-    let stream = state.gemini_service.get_summary(req_dto).await;
+    let stream = service::get_summary(&state, req_dto).await;
     let body = Body::from_stream(stream);
 
     Response::builder()
@@ -117,8 +115,8 @@ pub async fn summarize(
 pub async fn get_models(
     State(state): State<Arc<AppState>>,
 ) -> Json<ApiBodyResponse<Vec<GeminiModelResDTO>>> {
-    let models = state.gemini_service.get_model_list().await;
-    Json(ApiResUtil::success_data_message(models, "SUCCESS"))
+    let models = service::get_model_list(&state).await;
+    Json(api_res_util::success_data_message(models, "SUCCESS"))
 }
 
 /// Google OAuth2 TokenInfo 엔드포인트를 통해 액세스 토큰을 검증하고 10분간 캐싱합니다.

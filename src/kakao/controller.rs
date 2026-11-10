@@ -9,8 +9,9 @@ use tracing::info;
 use crate::AppState;
 use crate::common::core::AppError;
 use crate::common::dto::ApiBodyResponse;
-use crate::common::util::api_res_util::ApiResUtil;
+use crate::common::util::api_res_util;
 use crate::kakao::dto::{KakaoSendReqDTO, KakaoTokenResDTO};
+use crate::kakao::service;
 
 /// 카카오 연동 도메인 라우터를 생성합니다.
 pub fn router() -> Router<Arc<AppState>> {
@@ -25,8 +26,8 @@ pub async fn refresh_kakao_token(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ApiBodyResponse<KakaoTokenResDTO>>, AppError> {
     info!("외부 카카오 토큰 갱신 요청 수신 (Scheduler-Job)");
-    match state.kakao_service.refresh_kakao_token().await {
-        Ok(res) => Ok(Json(ApiResUtil::success_data(res))),
+    match service::refresh_kakao_token(&state).await {
+        Ok(res) => Ok(Json(api_res_util::success_data(res))),
         Err(msg) => Err(AppError::ServerException {
             class_name: "RuntimeException".to_string(),
             message: msg,
@@ -43,6 +44,6 @@ pub async fn send_kakao_message(
 ) -> Json<ApiBodyResponse<Value>> {
     let msg = req.msg.unwrap_or_default();
     info!("외부 카카오 메시지 전송 요청 수신 (Scheduler-Job): {}", msg);
-    state.kakao_service.send_kakao_external(&msg).await;
-    Json(ApiResUtil::success())
+    service::send_kakao_external(&state, &msg).await;
+    Json(api_res_util::success())
 }

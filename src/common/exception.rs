@@ -3,7 +3,7 @@ use std::fmt;
 use serde_json::Value;
 
 use crate::common::enums::{ApiCommEnum, MessageEnum};
-use crate::common::util::messages_utils::MessagesUtils;
+use crate::common::util::messages_utils;
 
 /// 공통 에러 코드, 메시지, 성공 여부를 담는 기본 에러 구조체
 #[derive(Debug, Clone)]
@@ -99,19 +99,19 @@ impl ValidException {
 
     pub fn from_enum(e: MessageEnum) -> Self {
         Self {
-            message: MessagesUtils::get_message(e.code()),
+            message: messages_utils::get_message(e.code()),
         }
     }
 
     pub fn from_enum_with_arg(e: MessageEnum, arg: &str) -> Self {
         Self {
-            message: MessagesUtils::get_message_with_args(e.code(), &[arg]),
+            message: messages_utils::get_message_with_args(e.code(), &[arg]),
         }
     }
 
     pub fn from_enum_with_args(e: MessageEnum, args: &[&str]) -> Self {
         Self {
-            message: MessagesUtils::get_message_with_args(e.code(), args),
+            message: messages_utils::get_message_with_args(e.code(), args),
         }
     }
 }

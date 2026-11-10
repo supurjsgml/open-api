@@ -3,7 +3,7 @@ use utoipa::ToSchema;
 
 use crate::common::core::get_current_uuid;
 use crate::common::enums::MessageEnum;
-use crate::common::util::messages_utils::MessagesUtils;
+use crate::common::util::messages_utils;
 
 /// 공통 페이징 계산 및 SQL LIMIT 구문 생성을 담당하는 구조체
 /// #[serde(rename_all = "camelCase")]는 snake_case 필드명을 JSON 직렬화 시 camelCase로 자동 변환합니다.
@@ -85,7 +85,7 @@ impl Default for HeaderSuccess {
         Self {
             uuid: get_current_uuid(),
             code: "SUCCESS".to_string(),
-            message: MessagesUtils::get_message(MessageEnum::SuccessPrcs.code()),
+            message: messages_utils::get_message(MessageEnum::SuccessPrcs.code()),
         }
     }
 }
@@ -226,7 +226,7 @@ impl FileGenReqDTO {
         if self.camel_str.is_none() {
             return Err(format!(
                 "camelStr : {}",
-                MessagesUtils::get_message(MessageEnum::BadRequest.code())
+                messages_utils::get_message(MessageEnum::BadRequest.code())
             ));
         }
         Ok(())

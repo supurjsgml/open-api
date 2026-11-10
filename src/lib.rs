@@ -25,32 +25,17 @@ use crate::common::core::{
     handle_no_resource_found, request_logging_middleware, security_origin_middleware,
 };
 use crate::common::logging::{AxiomBatchSender, LokiSender};
-use crate::common::service::CommonService;
-use crate::common::util::web_client_util::WebClientUtil;
+use crate::common::util::web_client_util;
 use crate::config::AppConfig;
 use crate::gemini::controller::TokenCache;
-use crate::gemini::rate_limit::RateLimitService;
-use crate::gemini::service::GeminiService;
-use crate::internal::service::InternalService;
-use crate::kafka::service::KafkaProducerService;
-use crate::kakao::service::KakaoService;
-use crate::member::service::MemberService;
 
 /// 애플리케이션 전역 공유 상태
 /// `Arc<AppState>` 형태로 각 핸들러에 주입되어 스레드 안전하게 공유됩니다.
 pub struct AppState {
     pub config: AppConfig,
     pub http_client: reqwest::Client,
-    pub web_client: WebClientUtil,
     pub redis_client: Option<redis::Client>,
     pub token_cache: TokenCache,
-    pub rate_limit_service: RateLimitService,
-    pub gemini_service: GeminiService,
-    pub internal_service: InternalService,
-    pub kakao_service: KakaoService,
-    pub member_service: MemberService,
-    pub common_service: CommonService,
-    pub kafka_producer: KafkaProducerService,
     pub axiom_sender: AxiomBatchSender,
     pub loki_sender: LokiSender,
 }
@@ -58,21 +43,12 @@ pub struct AppState {
 impl AppState {
     /// 환경 설정(`AppConfig`)으로부터 모든 하위 서비스와 클라이언트를 초기화합니다.
     pub fn from_config(config: AppConfig) -> Self {
-        let web_client = WebClientUtil::new();
-        let http_client = web_client.raw_client().clone();
+        let http_client = web_client_util::create_client();
 
         let redis_url = config.redis.connection_url();
         let redis_client = redis::Client::open(redis_url).ok();
 
         let token_cache: TokenCache = Arc::new(RwLock::new(HashMap::new()));
-        let rate_limit_service = RateLimitService::new(redis_client.clone(), config.clone());
-        let gemini_service = GeminiService::new(http_client.clone(), config.clone());
-        let internal_service = InternalService::new(redis_client.clone());
-        let kakao_service =
-            KakaoService::new(http_client.clone(), redis_client.clone(), config.clone());
-        let member_service = MemberService::new(web_client.clone(), config.clone());
-        let common_service = CommonService::new(config.common_constants.clone());
-        let kafka_producer = KafkaProducerService::new();
 
         let axiom_sender = AxiomBatchSender::start(&config.axiom);
         let loki_sender = LokiSender::start(&config.loki);
@@ -81,16 +57,8 @@ impl AppState {
         Self {
             config,
             http_client,
-            web_client,
             redis_client,
             token_cache,
-            rate_limit_service,
-            gemini_service,
-            internal_service,
-            kakao_service,
-            member_service,
-            common_service,
-            kafka_producer,
             axiom_sender,
             loki_sender,
         }

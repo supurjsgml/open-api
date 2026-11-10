@@ -4,7 +4,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 
 use crate::AppState;
-use crate::common::util::common_util::CommonUtil;
+use crate::common::util::common_util;
 use crate::junit::dto::{
     OrderResponseMapper, OrderSeatAssignPriceResponseDto, SeatAssignPriceDto,
 };
@@ -50,10 +50,10 @@ pub fn create_dummy_data() -> Vec<SeatAssignPriceDto> {
 }
 
 /// GET `/test/commonUtil`
-/// `CommonUtil::convert_list` (Serde 기반 범용 변환) 방식으로 30,000건의 DTO 리스트를 변환합니다.
+/// `common_util::convert_list` (Serde 기반 범용 변환) 방식으로 30,000건의 DTO 리스트를 변환합니다.
 pub async fn test_common_util() -> Json<Vec<OrderSeatAssignPriceResponseDto>> {
     let source_list = create_dummy_data();
-    let result = CommonUtil::convert_list::<SeatAssignPriceDto, OrderSeatAssignPriceResponseDto>(
+    let result = common_util::convert_list::<SeatAssignPriceDto, OrderSeatAssignPriceResponseDto>(
         &source_list,
     );
     Json(result)

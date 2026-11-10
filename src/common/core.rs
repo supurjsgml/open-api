@@ -172,9 +172,8 @@ impl IntoResponse for AppError {
                 if let Some(app_state) = state {
                     let error_msg = format!("[restApi 서버 에러] {} : {}", class_name, message);
                     let truncated: String = error_msg.chars().take(180).collect();
-                    let kakao_service = app_state.kakao_service.clone();
                     tokio::spawn(async move {
-                        kakao_service.send_kakao(&truncated).await;
+                        crate::kakao::service::send_kakao(&app_state, &truncated).await;
                     });
                 }
 

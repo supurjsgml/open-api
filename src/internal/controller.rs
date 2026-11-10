@@ -7,8 +7,9 @@ use serde_json::Value;
 
 use crate::AppState;
 use crate::common::dto::ApiBodyResponse;
-use crate::common::util::api_res_util::ApiResUtil;
+use crate::common::util::api_res_util;
 use crate::internal::dto::{DashboardStatsDTO, PageVisitsDTO, VisitorHitReqDTO};
+use crate::internal::service;
 
 /// 대시보드 및 방문자 통계 도메인 라우터를 생성합니다.
 pub fn router() -> Router<Arc<AppState>> {
@@ -23,8 +24,8 @@ pub fn router() -> Router<Arc<AppState>> {
 pub async fn get_dashboard_stats(
     State(state): State<Arc<AppState>>,
 ) -> Json<ApiBodyResponse<DashboardStatsDTO>> {
-    let stats = state.internal_service.get_dashboard_stats().await;
-    Json(ApiResUtil::success_data(stats))
+    let stats = service::get_dashboard_stats(&state).await;
+    Json(api_res_util::success_data(stats))
 }
 
 /// GET `/api/front/pageStats`
@@ -32,8 +33,8 @@ pub async fn get_dashboard_stats(
 pub async fn get_page_stats(
     State(state): State<Arc<AppState>>,
 ) -> Json<ApiBodyResponse<PageVisitsDTO>> {
-    let stats = state.internal_service.get_page_visits().await;
-    Json(ApiResUtil::success_data(stats))
+    let stats = service::get_page_visits(&state).await;
+    Json(api_res_util::success_data(stats))
 }
 
 /// POST `/api/front/hit`
@@ -42,6 +43,6 @@ pub async fn record_hit(
     State(state): State<Arc<AppState>>,
     Json(req_dto): Json<VisitorHitReqDTO>,
 ) -> Json<ApiBodyResponse<Value>> {
-    state.internal_service.record_hit(req_dto).await;
-    Json(ApiResUtil::success())
+    service::record_hit(&state, req_dto).await;
+    Json(api_res_util::success())
 }

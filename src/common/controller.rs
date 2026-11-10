@@ -15,7 +15,8 @@ use crate::{
         core::AppError,
         dto::{ApiBodyResponse, FileGenReqDTO, HeaderSuccess},
         enums::MessageEnum,
-        util::api_res_util::ApiResUtil,
+        service,
+        util::api_res_util,
     },
 };
 
@@ -36,7 +37,7 @@ pub async fn gen_file(
         return Err(AppError::MethodArgumentNotValid(valid_msg));
     }
 
-    if let Err(e) = state.common_service.create_package(&file_gen_req) {
+    if let Err(e) = service::create_package(&state, &file_gen_req) {
         error!("CommonController failDownload ERROR : {}", e.message);
     }
 
@@ -48,8 +49,8 @@ pub async fn get_file_info(
     State(state): State<Arc<AppState>>,
     Json(file_gen_req): Json<FileGenReqDTO>,
 ) -> Json<ApiBodyResponse<HashMap<String, String>>> {
-    let info_map = state.common_service.get_file_info(&file_gen_req);
-    let resp = ApiResUtil::success_with_header(
+    let info_map = service::get_file_info(&state, &file_gen_req);
+    let resp = api_res_util::success_with_header(
         info_map,
         HeaderSuccess::default(),
         MessageEnum::Success.code(),

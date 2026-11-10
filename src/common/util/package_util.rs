@@ -1,19 +1,16 @@
-use crate::common::util::common_util::CommonUtil;
+use crate::common::util::common_util;
 
 /// 기본 컨트롤러 보일러플레이트 소스 코드 문자열을 포맷팅해 생성하는 유틸리티
-pub struct PackageUtil;
+pub fn create_package(pack_path: &str, file_nm: &str, dto_nm: &str) -> String {
+    let service = format!("{}Service", common_util::decapitalize(file_nm));
+    let low_upper_dto_nm = common_util::decapitalize(dto_nm);
 
-impl PackageUtil {
-    pub fn create_package(pack_path: &str, file_nm: &str, dto_nm: &str) -> String {
-        let service = format!("{}Service", CommonUtil::decapitalize(file_nm));
-        let low_upper_dto_nm = CommonUtil::decapitalize(dto_nm);
-
-        format!(
-            "package {pack_path}.controller;\n\n\
+    format!(
+        "package {pack_path}.controller;\n\n\
 import org.springframework.http.MediaType;\n\
 import org.springframework.web.bind.annotation.PostMapping;\n\
-import org.springframework.web.bind.annotation.RequestBody;\n\
 import org.springframework.web.bind.annotation.RequestMapping;\n\
+import org.springframework.web.bind.annotation.RequestBody;\n\
 import org.springframework.web.bind.annotation.RestController;\n\n\
 import {pack_path}.dto.{dto_nm};\n\
 import {pack_path}.service.{file_nm}Service;\n\n\
@@ -34,6 +31,5 @@ public class {file_nm}Controller {{\n\n\
         {service}.fileDownload({low_upper_dto_nm});\n\
     }}\n\n\
 }}\n"
-        )
-    }
+    )
 }

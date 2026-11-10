@@ -7,8 +7,9 @@ use serde_json::Value;
 
 use crate::AppState;
 use crate::common::dto::ApiBodyResponse;
-use crate::common::util::api_res_util::ApiResUtil;
+use crate::common::util::api_res_util;
 use crate::member::dto::{MemberReqDTO, MemberResDTO};
+use crate::member::service;
 
 /// 회원(잡코리아) 연동 도메인 라우터를 생성합니다.
 pub fn router() -> Router<Arc<AppState>> {
@@ -23,18 +24,18 @@ pub async fn job_korea_login(
     State(state): State<Arc<AppState>>,
     Json(req_dto): Json<MemberReqDTO>,
 ) -> Json<ApiBodyResponse<MemberResDTO>> {
-    let res_opt = state.member_service.job_korea_login(&req_dto).await;
+    let res_opt = service::job_korea_login(&state, &req_dto).await;
 
     match res_opt {
-        None => Json(ApiResUtil::failed()),
+        None => Json(api_res_util::failed()),
         Some(res) => {
             if let Some(ref err_code) = res.err_code {
                 if !err_code.trim().is_empty() {
                     let msg = res.err_msg.clone().unwrap_or_default();
-                    return Json(ApiResUtil::failed_message(msg));
+                    return Json(api_res_util::failed_message(msg));
                 }
             }
-            Json(ApiResUtil::success_data_message(res, "SUCCESS"))
+            Json(api_res_util::success_data_message(res, "SUCCESS"))
         }
     }
 }
@@ -45,6 +46,6 @@ pub async fn job_korea_logout(
     State(state): State<Arc<AppState>>,
     Json(req_dto): Json<MemberReqDTO>,
 ) -> Json<ApiBodyResponse<Value>> {
-    state.member_service.job_korea_logout(&req_dto).await;
-    Json(ApiResUtil::success())
+    service::job_korea_logout(&state, &req_dto).await;
+    Json(api_res_util::success())
 }

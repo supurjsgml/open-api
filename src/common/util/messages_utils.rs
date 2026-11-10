@@ -3,8 +3,6 @@ use std::sync::OnceLock;
 
 /// 다국어 메시지 사전(한국어/영어) 조회 및 파라미터 포맷팅 유틸리티
 /// OnceLock은 멀티스레드 환경에서 최초 1회만 안전하게 초기화되는 정적 싱글톤 저장소입니다.
-pub struct MessagesUtils;
-
 static KO_MESSAGES: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
 static EN_MESSAGES: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
 
@@ -83,36 +81,34 @@ fn en_map() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
-impl MessagesUtils {
-    /// 기본 로케일(ko) 기준으로 메시지 코드에 해당하는 문자열 반환
-    pub fn get_message(code: &str) -> String {
-        Self::get_message_with_args(code, &[])
-    }
+/// 기본 로케일(ko) 기준으로 메시지 코드에 해당하는 문자열 반환
+pub fn get_message(code: &str) -> String {
+    get_message_with_args(code, &[])
+}
 
-    /// 메시지 템플릿의 {0}, {1} 위치에 인자(args)를 치환하여 반환
-    pub fn get_message_with_args(code: &str, args: &[&str]) -> String {
-        let base = ko_map().get(code).copied().unwrap_or(code);
-        Self::format_args(base, args)
-    }
+/// 메시지 템플릿의 {0}, {1} 위치에 인자(args)를 치환하여 반환
+pub fn get_message_with_args(code: &str, args: &[&str]) -> String {
+    let base = ko_map().get(code).copied().unwrap_or(code);
+    format_args(base, args)
+}
 
-    /// 지정된 언어 코드(ko / en)에 맞춰 메시지를 반환
-    pub fn get_message_with_lang(code: &str, lang: Option<&str>) -> String {
-        match lang {
-            Some("en") | Some("EN") => en_map().get(code).copied().unwrap_or(code).to_string(),
-            _ => Self::get_message(code),
-        }
+/// 지정된 언어 코드(ko / en)에 맞춰 메시지를 반환
+pub fn get_message_with_lang(code: &str, lang: Option<&str>) -> String {
+    match lang {
+        Some("en") | Some("EN") => en_map().get(code).copied().unwrap_or(code).to_string(),
+        _ => get_message(code),
     }
+}
 
-    pub fn get_message_by_code(msg: &str) -> String {
-        Self::get_message(msg)
-    }
+pub fn get_message_by_code(msg: &str) -> String {
+    get_message(msg)
+}
 
-    fn format_args(template: &str, args: &[&str]) -> String {
-        let mut out = template.to_string();
-        for (idx, val) in args.iter().enumerate() {
-            let placeholder = format!("{{{}}}", idx);
-            out = out.replace(&placeholder, val);
-        }
-        out
+fn format_args(template: &str, args: &[&str]) -> String {
+    let mut out = template.to_string();
+    for (idx, val) in args.iter().enumerate() {
+        let placeholder = format!("{{{}}}", idx);
+        out = out.replace(&placeholder, val);
     }
+    out
 }
