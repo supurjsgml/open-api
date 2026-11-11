@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use regex::Regex;
@@ -10,14 +11,84 @@ use tracing::{error, info};
 use crate::AppState;
 use crate::gemini::dto::{
     GeminiApiRequest, GeminiApiResponse, GeminiModelInfo, GeminiModelListResponse,
-    GeminiModelResDTO, GeminiReqDTO,
+    GeminiModelResDTO, GeminiReqDTO, Part,
 };
 
 /// 버전 번호 추출용 정규표현식 (예: gemini-3.7-flash -> 3.7)
 static VERSION_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"gemini-(\d+(?:\.\d+)?)").expect("Invalid regex"));
 
-/// 본문과 프롬프트를 결합하여 Gemini 스트리밍 요약 결과를 비동기 스트림(`ReceiverStream`)으로 반환합니다.
+/// 멀티모달 스트리밍 요청 타임아웃 (180초)
+const STREAM_REQUEST_TIMEOUT_SECS: u64 = 180;
+/// 프롬프트 미입력 및 이미지 첨부 시 사용할 기본 프롬프트
+const DEFAULT_IMAGE_PROMPT: &str = "첨부된 이미지를 분석하고 핵심 내용을 설명해 주세요.";
+/// 프롬프트 미입력 및 텍스트 단독 요약 시 사용할 기본 프롬프트
+const DEFAULT_TEXT_PROMPT: &str = "다음 웹페이지 내용을 핵심 위주로 요약해 주세요.";
+
+/// Data URL 접두어(`data:...;base64,`)가 포함된 경우 순수 Base64 구간만 잘라 반환합니다.
+pub fn strip_base64_prefix_str(data: &str) -> &str {
+    let trimmed = data.trim();
+    if trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("data:") {
+        if let Some((_, b64)) = trimmed.split_once(";base64,") {
+            return b64.trim();
+        }
+        if let Some((_, b64)) = trimmed.split_once(',') {
+            return b64.trim();
+        }
+    }
+    trimmed
+}
+
+/// 소유권을 유지한 채 불필요한 재할당 없이 순수 Base64 문자열로 정규화합니다.
+fn normalize_base64_owned(data: String) -> String {
+    let stripped = strip_base64_prefix_str(&data);
+    if stripped.len() == data.len() {
+        data
+    } else {
+        stripped.to_string()
+    }
+}
+
+/// 요청 DTO의 소유권을 이동 받아 멀티모달 `GeminiApiRequest` 페이로드를 조립합니다.
+pub fn build_multimodal_request(req_dto: GeminiReqDTO) -> GeminiApiRequest {
+    let GeminiReqDTO {
+        text,
+        prompt,
+        images,
+        ..
+    } = req_dto;
+
+    let image_list = images.unwrap_or_default();
+    let mut parts = Vec::with_capacity(image_list.len() + 1);
+
+    for img in image_list {
+        let mime_type = img.mime_type.trim().to_ascii_lowercase();
+        let clean_data = normalize_base64_owned(img.data);
+        parts.push(Part::inline_data(mime_type, clean_data));
+    }
+
+    let prompt_str = prompt.as_deref().map(str::trim).unwrap_or("");
+    let text_str = text.as_deref().map(str::trim).unwrap_or("");
+
+    let base_prompt = if !prompt_str.is_empty() {
+        prompt_str
+    } else if !parts.is_empty() {
+        DEFAULT_IMAGE_PROMPT
+    } else {
+        DEFAULT_TEXT_PROMPT
+    };
+
+    let combined_prompt = if !text_str.is_empty() {
+        format!("{}\n\n[웹페이지 본문 내용]\n{}", base_prompt, text_str)
+    } else {
+        base_prompt.to_string()
+    };
+
+    parts.push(Part::text(combined_prompt));
+    GeminiApiRequest::from_parts(parts)
+}
+
+/// 본문·프롬프트·첨부 이미지를 결합하여 Gemini SSE 스트리밍 결과를 비동기 스트림(`ReceiverStream`)으로 반환합니다.
 pub async fn get_summary(
     state: &AppState,
     req_dto: GeminiReqDTO,
@@ -25,13 +96,13 @@ pub async fn get_summary(
     let (tx, rx) = mpsc::channel(32);
 
     let model = match req_dto.model.as_deref() {
-        Some(m) if !m.trim().is_empty() => m.to_string(),
-        _ => "gemini-1.5-flash".to_string(),
+        Some(m) if !m.trim().is_empty() => m.trim().to_string(),
+        _ => "gemini-2.5-flash".to_string(),
     };
 
-    // 스트리밍 엔드포인트 URL 구성
+    // 실시간 토큰 수신을 위한 SSE(`alt=sse`) 스트리밍 엔드포인트 URL 구성
     let stream_url = format!(
-        "{}?key={}",
+        "{}?alt=sse&key={}",
         state
             .config
             .rest_api
@@ -42,22 +113,20 @@ pub async fn get_summary(
         state.config.keys.gemini_api_key
     );
 
-    let combined_prompt = format!(
-        "{}\n\n[웹페이지 본문 내용]\n{}",
-        req_dto.prompt.unwrap_or_default(),
-        req_dto.text.unwrap_or_default()
-    );
-
-    let request_body = GeminiApiRequest::from_text(&combined_prompt);
+    let request_body = build_multimodal_request(req_dto);
     let client = state.http_client.clone();
 
     tokio::spawn(async move {
         let response_result = client
             .post(&stream_url)
+            .timeout(Duration::from_secs(STREAM_REQUEST_TIMEOUT_SECS))
             .header("Content-Type", "application/json")
             .json(&request_body)
             .send()
             .await;
+
+        // 요청 바디 직렬화 및 전송 완료 즉시 대용량 Base64 버퍼 해제
+        drop(request_body);
 
         match response_result {
             Ok(response) => {
@@ -77,18 +146,15 @@ pub async fn get_summary(
                     return;
                 }
 
-                // 바이트 스트림에서 JSON 응답 청크를 수집 및 파싱하여 텍스트 조각을 전송합니다.
+                // 바이트 버퍼(`Vec<u8>`) 단위로 줄바꿈 경계를 분리하여 멀티바이트 UTF-8 깨짐 없이 즉시 파싱
                 let mut byte_stream = response.bytes_stream();
-                let mut buffer = String::new();
+                let mut raw_buffer: Vec<u8> = Vec::with_capacity(4096);
 
                 while let Some(chunk_res) = byte_stream.next().await {
                     match chunk_res {
                         Ok(bytes) => {
-                            let chunk_str = String::from_utf8_lossy(&bytes);
-                            buffer.push_str(&chunk_str);
-
-                            // 단일 객체 또는 배열 형태의 JSON 청크에서 텍스트 추출 시도
-                            extract_and_send_texts(&mut buffer, &tx).await;
+                            raw_buffer.extend_from_slice(&bytes);
+                            consume_sse_lines(&mut raw_buffer, &tx).await;
                         }
                         Err(e) => {
                             error!("Gemini API Stream Chunk Error: {}", e);
@@ -103,9 +169,9 @@ pub async fn get_summary(
                     }
                 }
 
-                // 스트림 종료 후 남은 버퍼 처리
-                if !buffer.trim().is_empty() {
-                    flush_remaining_buffer(&buffer, &tx).await;
+                // 스트림 종료 후 줄바꿈 없이 남아 있는 잔여 바이트 처리
+                if !raw_buffer.is_empty() {
+                    flush_sse_buffer(&mut raw_buffer, &tx).await;
                 }
             }
             Err(e) => {
@@ -123,56 +189,79 @@ pub async fn get_summary(
     ReceiverStream::new(rx)
 }
 
-/// 스트리밍 버퍼에서 완성된 GeminiApiResponse JSON 객체들을 파싱하여 채널로 전송합니다.
-async fn extract_and_send_texts(
-    buffer: &mut String,
+/// 바이트 버퍼에서 완성된 개행(`\n`) 단위 SSE 라인들을 순차 추출하여 즉시 전송합니다.
+pub async fn consume_sse_lines(
+    raw_buffer: &mut Vec<u8>,
     tx: &mpsc::Sender<Result<String, std::convert::Infallible>>,
 ) {
-    if let Ok(list) = serde_json::from_str::<Vec<GeminiApiResponse>>(buffer) {
-        for resp in list {
-            if let Some(text) = extract_text_from_response(&resp) {
-                let _ = tx.send(Ok(text)).await;
-            }
-        }
-        buffer.clear();
-        return;
-    }
+    while let Some(newline_pos) = raw_buffer.iter().position(|&b| b == b'\n') {
+        let line = String::from_utf8_lossy(&raw_buffer[..newline_pos])
+            .trim()
+            .to_string();
+        raw_buffer.drain(..=newline_pos);
 
-    if let Ok(single) = serde_json::from_str::<GeminiApiResponse>(buffer) {
-        if let Some(text) = extract_text_from_response(&single) {
-            let _ = tx.send(Ok(text)).await;
-        }
-        buffer.clear();
-    }
-}
-
-/// 스트림 완료 시점에 남아 있는 버퍼에서 텍스트를 추출합니다.
-async fn flush_remaining_buffer(
-    buffer: &str,
-    tx: &mpsc::Sender<Result<String, std::convert::Infallible>>,
-) {
-    let trimmed = buffer.trim();
-    if let Ok(list) = serde_json::from_str::<Vec<GeminiApiResponse>>(trimmed) {
-        for resp in list {
-            if let Some(text) = extract_text_from_response(&resp) {
-                let _ = tx.send(Ok(text)).await;
-            }
-        }
-    } else if let Ok(single) = serde_json::from_str::<GeminiApiResponse>(trimmed) {
-        if let Some(text) = extract_text_from_response(&single) {
+        if let Some(text) = extract_text_from_sse_line(&line) {
             let _ = tx.send(Ok(text)).await;
         }
     }
 }
 
-/// Gemini 응답 구조체에서 첫 번째 후보의 텍스트를 추출합니다.
+/// 스트림 종료 시점에 개행 없이 남아 있는 바이트 버퍼를 파싱하여 플러시합니다.
+pub async fn flush_sse_buffer(
+    raw_buffer: &mut Vec<u8>,
+    tx: &mpsc::Sender<Result<String, std::convert::Infallible>>,
+) {
+    let remaining = String::from_utf8_lossy(raw_buffer);
+    let trimmed = remaining.trim();
+
+    if !trimmed.is_empty() {
+        if let Some(text) = extract_text_from_sse_line(trimmed) {
+            let _ = tx.send(Ok(text)).await;
+        } else if let Ok(list) = serde_json::from_str::<Vec<GeminiApiResponse>>(trimmed) {
+            for resp in list {
+                if let Some(text) = extract_text_from_response(&resp) {
+                    let _ = tx.send(Ok(text)).await;
+                }
+            }
+        } else if let Ok(single) = serde_json::from_str::<GeminiApiResponse>(trimmed) {
+            if let Some(text) = extract_text_from_response(&single) {
+                let _ = tx.send(Ok(text)).await;
+            }
+        }
+    }
+
+    raw_buffer.clear();
+}
+
+/// 단일 SSE 라인(`data: {...}`)에서 텍스트 조각을 추출합니다.
+fn extract_text_from_sse_line(line: &str) -> Option<String> {
+    let payload = line.strip_prefix("data:")?.trim();
+    if payload.is_empty() || payload == "[DONE]" {
+        return None;
+    }
+    let resp = serde_json::from_str::<GeminiApiResponse>(payload).ok()?;
+    extract_text_from_response(&resp)
+}
+
+/// Gemini 응답 구조체에서 첫 번째 후보의 텍스트 파트들을 결합하여 추출합니다.
 fn extract_text_from_response(response: &GeminiApiResponse) -> Option<String> {
     let candidates = response.candidates.as_ref()?;
     let first_candidate = candidates.first()?;
     let content = first_candidate.content.as_ref()?;
     let parts = content.parts.as_ref()?;
-    let first_part = parts.first()?;
-    first_part.text.clone()
+
+    let mut combined = String::new();
+    for part in parts {
+        if let Some(ref t) = part.text {
+            combined.push_str(t);
+        }
+    }
+
+    if combined.is_empty() {
+        None
+    } else {
+        Some(combined)
+    }
 }
 
 /// 사용 가능한 Gemini 모델 목록을 조회하고 우선순위에 따라 정렬하여 반환합니다.

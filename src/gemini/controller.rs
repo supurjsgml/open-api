@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -18,10 +18,28 @@ use crate::common::util::api_res_util;
 use crate::gemini::dto::{GeminiModelResDTO, GeminiReqDTO};
 use crate::gemini::{rate_limit, service};
 
+/// 멀티모달 요약 요청 최대 바디 크기 (15 MiB)
+const MAX_SUMMARIZE_BODY_BYTES: usize = 15 * 1024 * 1024;
+/// 최대 첨부 이미지 개수
+const MAX_IMAGE_COUNT: usize = 4;
+/// 개별 이미지 Base64 문자열 최대 길이 (약 4MB 원본 대응)
+const MAX_BASE64_LENGTH: usize = 5_600_000;
+/// 허용되는 이미지 MIME 타입 목록
+const ALLOWED_IMAGE_MIMES: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+];
+
 /// Gemini AI 도메인 라우터를 생성합니다.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/gemini/summarize", post(summarize))
+        .route(
+            "/api/gemini/summarize",
+            post(summarize).layer(DefaultBodyLimit::max(MAX_SUMMARIZE_BODY_BYTES)),
+        )
         .route("/api/gemini/models", get(get_models))
 }
 
@@ -83,6 +101,12 @@ pub async fn summarize(
         );
     };
 
+    // 일일 한도 차감 전 멀티모달 입력 유효성 검증
+    if let Err(err_msg) = validate_summary_request(&req_dto) {
+        warn!("[Gemini Validation] Rejected summarize request: {}", err_msg);
+        return plain_text_response(err_msg);
+    }
+
     // 사용자 고유 식별자 결정 (sub -> user_id -> email 순서)
     let sub_id = token_info
         .sub
@@ -99,15 +123,54 @@ pub async fn summarize(
         );
     }
 
-    // 비동기 텍스트 스트림 생성 및 반환
+    // 비동기 텍스트 스트림 생성 및 압축 버퍼링 우회 헤더 반환
     let stream = service::get_summary(&state, req_dto).await;
     let body = Body::from_stream(stream);
 
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-cache, no-transform")
+        .header("X-Accel-Buffering", "no")
         .body(body)
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// 요약 및 멀티모달 이미지 첨부 요청의 유효성을 검증합니다.
+pub fn validate_summary_request(req_dto: &GeminiReqDTO) -> Result<(), &'static str> {
+    let has_text = req_dto
+        .text
+        .as_deref()
+        .is_some_and(|t| !t.trim().is_empty());
+    let images = req_dto.images.as_deref().unwrap_or(&[]);
+
+    if !has_text && images.is_empty() {
+        return Err("ERROR: 분석할 텍스트 또는 이미지가 없습니다.");
+    }
+
+    if images.len() > MAX_IMAGE_COUNT {
+        return Err("ERROR: 이미지는 최대 4장까지만 첨부할 수 있습니다.");
+    }
+
+    for img in images {
+        let mime = img.mime_type.trim().to_ascii_lowercase();
+        if !ALLOWED_IMAGE_MIMES.contains(&mime.as_str()) {
+            return Err(
+                "ERROR: 지원하지 않는 이미지 형식입니다. (PNG, JPEG, WEBP, HEIC, HEIF만 허용)",
+            );
+        }
+
+        let clean_data = service::strip_base64_prefix_str(img.data.trim());
+        if clean_data.is_empty() {
+            return Err("ERROR: 비어 있는 이미지 데이터가 포함되어 있습니다.");
+        }
+
+        if img.data.len() > MAX_BASE64_LENGTH || clean_data.len() > MAX_BASE64_LENGTH {
+            return Err("ERROR: 개별 이미지 용량이 허용 한도(약 4MB)를 초과했습니다.");
+        }
+    }
+
+    Ok(())
 }
 
 /// GET `/api/gemini/models`

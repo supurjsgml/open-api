@@ -393,12 +393,31 @@ pub async fn openapi_json() -> Json<Value> {
                         }
                     }
                 },
+                "ImageAttachment": {
+                    "type": "object",
+                    "required": ["mimeType", "data"],
+                    "properties": {
+                        "mimeType": {
+                            "type": "string",
+                            "description": "첨부 이미지 MIME 타입 (image/png, image/jpeg, image/webp, image/heic, image/heif)"
+                        },
+                        "data": {
+                            "type": "string",
+                            "description": "순수 Base64 인코딩된 이미지 데이터"
+                        }
+                    }
+                },
                 "GeminiReqDTO": {
                     "type": "object",
                     "properties": {
                         "text": { "type": "string" },
                         "prompt": { "type": "string" },
-                        "model": { "type": "string" }
+                        "model": { "type": "string" },
+                        "images": {
+                            "type": "array",
+                            "maxItems": 4,
+                            "items": { "$ref": "#/components/schemas/ImageAttachment" }
+                        }
                     }
                 },
                 "VisitorHitReqDTO": {
